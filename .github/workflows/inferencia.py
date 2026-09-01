@@ -18,8 +18,8 @@ print("Iniciando o Pipeline de Inferência...")
 # ==============================================================================
 # 1. CONEXÃO COM SUPABASE
 # ==============================================================================
-SUPABASE_URL = os.getenv("https://bwpezxfpgtdwyjirwfbv.supabase.co/rest/v1/")
-SUPABASE_KEY = os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3cGV6eGZwZ3Rkd3lqaXJ3ZmJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc3NTA4OTksImV4cCI6MjEwMzMyNjg5OX0.PtZkUhyynYkPULhxK1W4b1nwEgTdySMPyPljYHPmKrg")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 print("✅ Conectado ao Supabase!")
