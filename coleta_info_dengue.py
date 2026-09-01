@@ -26,7 +26,7 @@ print("✅ Conectado ao Supabase!")
 # ==============================================================================
 # 2. PARAMETROS DA API INFO DENGUE (SJC = geocode 3549904)
 # ==============================================================================
-url = "https://info.dengue.mat.br/api/alert"
+url = "https://info.dengue.mat.br/api/alertcity"
 params = {
     "geocode": 3549904,
     "disease": "dengue",
