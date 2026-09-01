@@ -46,7 +46,10 @@ print("✅ Conectado ao Supabase!")
 # 2. LER DADOS DO SUPABASE (TABELA: casos_dengue_sjc)
 # ==============================================================================
 print("Lendo dados do Supabase...")
-data = supabase.table("casos_dengue_sjc").select("*").order("data_semana", asc=True).execute()
+data = supabase.table("casos_dengue_sjc").select("*").order(
+    "data_semana",
+    desc=False
+).execute()
 df = pd.DataFrame(data.data)
 
 print(f"Total de registros: {len(df)}")
