@@ -62,6 +62,37 @@ df['data_semana'] = pd.to_datetime(df['data_semana'])
 df = df.sort_values('data_semana').reset_index(drop=True)
 
 # ==============================================================================
+# 3.1 BUSCAR ADL REAL (TABELA: adl_indice_sjc) E MESCLAR COM OS DADOS SEMANAIS
+# ==============================================================================
+print("Lendo índice ADL (LIRAa) do Supabase...")
+adl_data = supabase.table("adl_indice_sjc").select("*").order("data_referencia").execute()
+df_adl = pd.DataFrame(adl_data.data)
+
+if df_adl.empty:
+    raise RuntimeError("A tabela adl_indice_sjc está vazia. Cadastre ao menos um ciclo do LIRAa antes de rodar a inferência.")
+
+df_adl['data_referencia'] = pd.to_datetime(df_adl['data_referencia'])
+df_adl = df_adl.sort_values('data_referencia').reset_index(drop=True)
+
+# Remove a coluna antiga de ADL, se vier junto de casos_dengue_sjc, para evitar duplicidade
+if 'indice_breteu_adl' in df.columns:
+    df = df.drop(columns=['indice_breteu_adl'])
+
+df = pd.merge_asof(
+    df.sort_values('data_semana'),
+    df_adl[['data_referencia', 'indice_adl']].rename(columns={'indice_adl': 'indice_breteu_adl'}),
+    left_on='data_semana',
+    right_on='data_referencia',
+    direction='backward'
+)
+
+# Preenche eventuais semanas anteriores ao primeiro ciclo cadastrado
+df['indice_breteu_adl'] = df['indice_breteu_adl'].bfill()
+df = df.drop(columns=['data_referencia'])
+
+print(f"ADL mesclado com sucesso. Último ciclo usado: {df_adl['data_referencia'].max().strftime('%d/%m/%Y')}")
+
+# ==============================================================================
 # 4. ENGENHARIA DE RECURSOS (LAG FEATURES)
 # ==============================================================================
 for lag in [1, 2, 3]:
