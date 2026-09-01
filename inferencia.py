@@ -7,7 +7,6 @@ import numpy as np
 import xgboost as xgb
 import datetime
 import warnings
-import joblib
 import os
 from supabase import create_client
 
@@ -74,10 +73,6 @@ if df_adl.empty:
 df_adl['data_referencia'] = pd.to_datetime(df_adl['data_referencia'])
 df_adl = df_adl.sort_values('data_referencia').reset_index(drop=True)
 
-# Remove a coluna antiga de ADL, se vier junto de casos_dengue_sjc, para evitar duplicidade
-if 'indice_breteu_adl' in df.columns:
-    df = df.drop(columns=['indice_breteu_adl'])
-
 df = pd.merge_asof(
     df.sort_values('data_semana'),
     df_adl[['data_referencia', 'indice_adl']].rename(columns={'indice_adl': 'indice_breteu_adl'}),
@@ -86,12 +81,22 @@ df = pd.merge_asof(
     direction='backward'
 )
 
-# Preenche eventuais semanas anteriores ao primeiro ciclo cadastrado
+# Preenche somente semanas anteriores ao primeiro ciclo de ADL, se houver.
 df['indice_breteu_adl'] = df['indice_breteu_adl'].bfill()
+
+if df['indice_breteu_adl'].isna().any():
+    raise RuntimeError(
+        "Existem semanas sem ADL após o cruzamento. "
+        "Verifique as datas da tabela adl_indice_sjc."
+    )
+
+# Coluna auxiliar; não é usada pelo XGBoost.
 df = df.drop(columns=['data_referencia'])
 
-print(f"ADL mesclado com sucesso. Último ciclo usado: {df_adl['data_referencia'].max().strftime('%d/%m/%Y')}")
-
+print(
+    f"ADL mesclado com sucesso. Último ciclo usado: "
+    f"{df_adl['data_referencia'].max().strftime('%d/%m/%Y')}"
+    
 # ==============================================================================
 # 4. ENGENHARIA DE RECURSOS (LAG FEATURES)
 # ==============================================================================
@@ -137,12 +142,6 @@ modelo_producao.fit(X, y)
 print("✅ Modelo XGBoost treinado!")
 
 # ==============================================================================
-# 7. SALVAR MODELO
-# ==============================================================================
-joblib.dump(modelo_producao, 'modelo_xgboost.pkl')
-print("✅ Modelo salvo como 'modelo_xgboost.pkl'!")
-
-# ==============================================================================
 # 8. GERAR PREDIÇÃO PARA PRÓXIMAS 2 SEMANAS
 # ==============================================================================
 print("Gerando predições...")
@@ -152,27 +151,38 @@ ultima_semana = df.iloc[-1]
 
 # Preparar features para predição
 X_future = pd.DataFrame({
-    'lag_casos_1': [df['casos_confirmados'].iloc[-1]],
-    'lag_casos_2': [df['casos_confirmados'].iloc[-2]],
-    'lag_casos_3': [df['casos_confirmados'].iloc[-3]],
-    'lag_temp_1': [df['temperatura_minima'].iloc[-1]],
-    'lag_temp_2': [df['temperatura_minima'].iloc[-2]],
-    'lag_temp_3': [df['temperatura_minima'].iloc[-3]],
-    'lag_umid_1': [df['umidade_maxima'].iloc[-1]],
-    'lag_umid_2': [df['umidade_maxima'].iloc[-2]],
-    'lag_umid_3': [df['umidade_maxima'].iloc[-3]],
-    'densidade_populacional': [df['densidade_populacional'].iloc[-1]],
-    'taxa_coleta_residuos': [df['taxa_coleta_residuos'].iloc[-1]],
-    'indice_breteu_adl': [df['indice_breteu_adl'].iloc[-1]]
+    "temp_min_lag_1": [df["temperatura_minima"].iloc[-1]],
+    "umidade_lag_1": [df["umidade_maxima"].iloc[-1]],
+
+    "temp_min_lag_2": [df["temperatura_minima"].iloc[-2]],
+    "umidade_lag_2": [df["umidade_maxima"].iloc[-2]],
+
+    "temp_min_lag_3": [df["temperatura_minima"].iloc[-3]],
+    "umidade_lag_3": [df["umidade_maxima"].iloc[-3]],
+
+    "densidade_populacional": [df["densidade_populacional"].iloc[-1]],
+    "taxa_coleta_residuos": [df["taxa_coleta_residuos"].iloc[-1]],
+    "indice_breteu_adl": [df["indice_breteu_adl"].iloc[-1]],
+
+    "casos_lag_1": [df["casos_confirmados"].iloc[-1]],
+    "casos_lag_2": [df["casos_confirmados"].iloc[-2]],
+    "casos_lag_3": [df["casos_confirmados"].iloc[-3]]
 })
 
+# Garante, explicitamente, a mesma ordem usada no treinamento.
+X_future = X_future[features]
 predicao_semana_1 = modelo_producao.predict(X_future)[0]
 
-# Semana 2: usar predição da semana 1 como lag
+# Semana 2: desloca a janela autorregressiva de casos.
 X_future_2 = X_future.copy()
-X_future_2['lag_casos_1'] = predicao_semana_1
-predicao_semana_2 = modelo_producao.predict(X_future_2)[0]
 
+X_future_2["casos_lag_1"] = predicao_semana_1
+X_future_2["casos_lag_2"] = df["casos_confirmados"].iloc[-1]
+X_future_2["casos_lag_3"] = df["casos_confirmados"].iloc[-2]
+
+X_future_2 = X_future_2[features]
+
+predicao_semana_2 = modelo_producao.predict(X_future_2)[0]
 print(f"Predição semana 1: {predicao_semana_1:.0f} casos")
 print(f"Predição semana 2: {predicao_semana_2:.0f} casos")
 
