@@ -59,23 +59,29 @@ print(f"InfoDengue retornou {len(df)} registros brutos.")
 # ==============================================================================
 df['data'] = pd.to_datetime(df['data_iniSE'])
 
-df = df[['data', 'casos', 'tempmin', 'umidmax', 'pop']].copy()
+df = df[['data', 'casos', 'tempmin', 'umidmax']].copy()
 
 df.columns = [
     'data_semana',
     'casos_confirmados',
     'temperatura_minima',
-    'umidade_maxima',
-    'populacao'
+    'umidade_maxima'
 ]
 
-# Converte data para string ISO para o Supabase
 df['data_semana'] = df['data_semana'].dt.strftime('%Y-%m-%d')
 
+df['semana_epi'] = pd.to_datetime(df['data_semana']).dt.isocalendar().week.astype(int)
 # ==============================================================================
 # 5. UPSERT NO SUPABASE (evita duplicatas)
 # ==============================================================================
-registros = df.to_dict('records')
+registros = df[
+    [
+        'data_semana',
+        'casos_confirmados',
+        'temperatura_minima',
+        'umidade_maxima'
+    ]
+].to_dict('records')
 
 try:
     resultado = supabase.table("casos_dengue_sjc").upsert(
