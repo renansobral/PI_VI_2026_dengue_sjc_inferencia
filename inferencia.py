@@ -21,16 +21,22 @@ print("Iniciando o Pipeline de Inferência...")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 if not SUPABASE_URL:
+    raise RuntimeError("SUPABASE_URL não foi encontrada nos GitHub Secrets.")
+
+if not SUPABASE_URL.startswith("https://"):
+    raise RuntimeError("SUPABASE_URL deve começar com https://.")
+
+if "supabase.co" not in SUPABASE_URL:
+    raise RuntimeError("SUPABASE_URL não parece ser uma URL válida de projeto Supabase.")
+
+if "/rest/" in SUPABASE_URL or "/functions/" in SUPABASE_URL:
     raise RuntimeError(
-        "SUPABASE_URL não foi definida. "
-        "Verifique Settings > Secrets and variables > Actions no GitHub."
+        "SUPABASE_URL deve conter somente a URL-base do projeto, "
+        "sem /rest/v1, /functions ou nome de tabela."
     )
 
 if not SUPABASE_KEY:
-    raise RuntimeError(
-        "SUPABASE_KEY não foi definida. "
-        "Verifique Settings > Secrets and variables > Actions no GitHub."
-    )
+    raise RuntimeError("SUPABASE_KEY não foi encontrada nos GitHub Secrets.")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
