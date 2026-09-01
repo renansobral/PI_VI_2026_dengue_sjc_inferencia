@@ -20,6 +20,18 @@ print("Iniciando o Pipeline de Inferência...")
 # ==============================================================================
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+if not SUPABASE_URL:
+    raise RuntimeError(
+        "SUPABASE_URL não foi definida. "
+        "Verifique Settings > Secrets and variables > Actions no GitHub."
+    )
+
+if not SUPABASE_KEY:
+    raise RuntimeError(
+        "SUPABASE_KEY não foi definida. "
+        "Verifique Settings > Secrets and variables > Actions no GitHub."
+    )
+
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 print("✅ Conectado ao Supabase!")
