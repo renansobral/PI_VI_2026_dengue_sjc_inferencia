@@ -57,9 +57,17 @@ print(f"InfoDengue retornou {len(df)} registros brutos.")
 # ==============================================================================
 # 4. LIMPEZA E MAPEAMENTO DE COLUNAS
 # ==============================================================================
-df['data'] = pd.to_datetime(df['datainiSE'])
+df['data'] = pd.to_datetime(df['data_iniSE'])
+
 df = df[['data', 'casos', 'tempmin', 'umidmax', 'pop']].copy()
-df.columns = ['data_semana', 'casos_confirmados', 'temperatura_minima', 'umidade_maxima', 'populacao']
+
+df.columns = [
+    'data_semana',
+    'casos_confirmados',
+    'temperatura_minima',
+    'umidade_maxima',
+    'populacao'
+]
 
 # Converte data para string ISO para o Supabase
 df['data_semana'] = df['data_semana'].dt.strftime('%Y-%m-%d')
