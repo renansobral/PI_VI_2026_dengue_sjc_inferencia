@@ -5,7 +5,6 @@
 import pandas as pd
 import numpy as np
 import xgboost as xgb
-import datetime
 import warnings
 import os
 from supabase import create_client
@@ -199,16 +198,14 @@ supabase.table("predicoes_dengue").insert({
     "semana_predita": int(data_semana_1.strftime('%Y%m')),
     "data_predicao": data_semana_1.strftime('%Y-%m-%d'),
     "casos_previstos": int(predicao_semana_1),
-    "modelo_usado": "XGBoost_v1_github_actions",
-    "data_geracao": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    "modelo_usado": "XGBoost_v1_github_actions"
 }).execute()
 
 supabase.table("predicoes_dengue").insert({
     "semana_predita": int(data_semana_2.strftime('%Y%m')),
     "data_predicao": data_semana_2.strftime('%Y-%m-%d'),
     "casos_previstos": int(predicao_semana_2),
-    "modelo_usado": "XGBoost_v1_github_actions",
-    "data_geracao": datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    "modelo_usado": "XGBoost_v1_github_actions"
 }).execute()
 
 print("✅ Predições salvas no Supabase!")
