@@ -1,4 +1,4 @@
-name: Avaliar Modelos Dengue SJC
+name: Avaliar_Modelos_Dengue_SJC
 
 on:
   workflow_dispatch:
