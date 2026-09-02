@@ -294,6 +294,9 @@ print("Gerando predições...")
 # Pegar última semana disponível
 ultima_semana = df.iloc[-1]
 
+# Semana do ano da última semana (Timestamp direto, sem .dt)
+semana_ano_ultima = int(ultima_semana["data_semana"].isocalendar().week)
+
 # Preparar features para predição
 X_future = pd.DataFrame({
     # Lags de clima
@@ -322,8 +325,8 @@ X_future = pd.DataFrame({
         df["casos_confirmados"].iloc[-2] - df["casos_confirmados"].iloc[-3]
     ],
     # Sazonalidade anual
-    "semana_sin": [np.sin(2 * np.pi * ultima_semana["data_semana"].dt.isocalendar().week / 52)],
-    "semana_cos": [np.cos(2 * np.pi * ultima_semana["data_semana"].dt.isocalendar().week / 52)]
+    "semana_sin": [np.sin(2 * np.pi * semana_ano_ultima / 52)],
+    "semana_cos": [np.cos(2 * np.pi * semana_ano_ultima / 52)]
 })
 
 # Garante, explicitamente, a mesma ordem usada no treinamento.
@@ -364,7 +367,7 @@ X_future_2["variacao_casos_1s"] = (
 )
 
 # Atualiza sazonalidade para a semana seguinte
-semana_ano_2 = (ultima_semana["data_semana"] + pd.Timedelta(days=7)).dt.isocalendar().week
+semana_ano_2 = int((ultima_semana["data_semana"] + pd.Timedelta(days=7)).isocalendar().week)
 X_future_2["semana_sin"] = [np.sin(2 * np.pi * semana_ano_2 / 52)]
 X_future_2["semana_cos"] = [np.cos(2 * np.pi * semana_ano_2 / 52)]
 
