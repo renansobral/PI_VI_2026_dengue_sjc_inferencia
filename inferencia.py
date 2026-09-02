@@ -188,28 +188,30 @@ for i in range(len(df_backtest)):
         continue
 
     # Lags de clima
-    temp_min_lag_1 = historico["temperatura_minima"].iloc[-1]
-    umidade_lag_1 = historico["umidade_maxima"].iloc[-1]
-    temp_min_lag_2 = historico["temperatura_minima"].iloc[-2]
-    umidade_lag_2 = historico["umidade_maxima"].iloc[-2]
-    temp_min_lag_3 = historico["temperatura_minima"].iloc[-3]
-    umidade_lag_3 = historico["umidade_maxima"].iloc[-3]
+    temp_min_lag_1 = float(historico["temperatura_minima"].iloc[-1])
+    umidade_lag_1 = float(historico["umidade_maxima"].iloc[-1])
+    temp_min_lag_2 = float(historico["temperatura_minima"].iloc[-2])
+    umidade_lag_2 = float(historico["umidade_maxima"].iloc[-2])
+    temp_min_lag_3 = float(historico["temperatura_minima"].iloc[-3])
+    umidade_lag_3 = float(historico["umidade_maxima"].iloc[-3])
 
     # Lags de casos
-    casos_lag_1 = historico["casos_confirmados"].iloc[-1]
-    casos_lag_2 = historico["casos_confirmados"].iloc[-2]
-    casos_lag_3 = historico["casos_confirmados"].iloc[-3]
+    casos_lag_1 = float(historico["casos_confirmados"].iloc[-1])
+    casos_lag_2 = float(historico["casos_confirmados"].iloc[-2])
+    casos_lag_3 = float(historico["casos_confirmados"].iloc[-3])
 
     # Tendência
     casos_com_shift = historico["casos_confirmados"].shift(1)
-    casos_media_2s = casos_com_shift.iloc[-2:].mean()
-    casos_media_4s = casos_com_shift.iloc[-4:].mean()
-    variacao_casos_1s = historico["casos_confirmados"].iloc[-2] - historico["casos_confirmados"].iloc[-3]
+    casos_media_2s = float(casos_com_shift.iloc[-2:].mean())
+    casos_media_4s = float(casos_com_shift.iloc[-4:].mean())
+    variacao_casos_1s = float(
+        historico["casos_confirmados"].iloc[-2] - historico["casos_confirmados"].iloc[-3]
+    )
 
     # Sazonalidade
     semana_ano_alvo = int(linha_alvo["data_semana"].isocalendar().week)
-    semana_sin = np.sin(2 * np.pi * semana_ano_alvo / 52)
-    semana_cos = np.cos(2 * np.pi * semana_ano_alvo / 52)
+    semana_sin = float(np.sin(2 * np.pi * semana_ano_alvo / 52))
+    semana_cos = float(np.cos(2 * np.pi * semana_ano_alvo / 52))
 
     X_alvo = pd.DataFrame({
         'temp_min_lag_1': [temp_min_lag_1],
@@ -218,9 +220,9 @@ for i in range(len(df_backtest)):
         'umidade_lag_2': [umidade_lag_2],
         'temp_min_lag_3': [temp_min_lag_3],
         'umidade_lag_3': [umidade_lag_3],
-        'densidade_populacional': [linha_alvo["densidade_populacional"]],
-        'taxa_coleta_residuos': [linha_alvo["taxa_coleta_residuos"]],
-        'indice_breteu_adl': [linha_alvo["indice_breteu_adl"]],
+        'densidade_populacional': [float(linha_alvo["densidade_populacional"])],
+        'taxa_coleta_residuos': [float(linha_alvo["taxa_coleta_residuos"])],
+        'indice_breteu_adl': [float(linha_alvo["indice_breteu_adl"])],
         'casos_lag_1': [casos_lag_1],
         'casos_lag_2': [casos_lag_2],
         'casos_lag_3': [casos_lag_3],
@@ -229,11 +231,15 @@ for i in range(len(df_backtest)):
         'variacao_casos_1s': [variacao_casos_1s],
         'semana_sin': [semana_sin],
         'semana_cos': [semana_cos]
-    })[features]
+    })
+
+    # Garantir que todas as colunas são float
+    X_alvo = X_alvo.astype(float)
+    X_alvo = X_alvo[features]
 
     # Treinar modelo com todos os dados até i-1 (retreinamento a cada semana)
-    X_treino = historico[features]
-    y_treino = historico["casos_confirmados"]
+    X_treino = historico[features].astype(float)
+    y_treino = historico["casos_confirmados"].astype(float)
 
     modelo_backtest = xgb.XGBRegressor(
         learning_rate=0.2,
@@ -254,6 +260,7 @@ for i in range(len(df_backtest)):
     })
 
     # Adicionar semana real ao histórico para a próxima iteração
+    
     historico = pd.concat([historico, linha_alvo.to_frame().T], ignore_index=True)
 
 df_resultados_backtest = pd.DataFrame(resultados_backtest)
