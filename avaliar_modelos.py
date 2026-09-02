@@ -73,6 +73,39 @@ for lag in [1, 2, 3]:
     df[f"temp_min_lag_{lag}"] = df["temperatura_minima"].shift(lag)
     df[f"umidade_lag_{lag}"] = df["umidade_maxima"].shift(lag)
 
+# ==============================================================================
+# FEATURES EXPERIMENTAIS: TENDÊNCIA E SAZONALIDADE
+# Todas usam exclusivamente informações anteriores à semana prevista.
+# ==============================================================================
+df["casos_media_2s"] = (
+    df["casos_confirmados"]
+    .shift(1)
+    .rolling(window=2)
+    .mean()
+)
+
+df["casos_media_4s"] = (
+    df["casos_confirmados"]
+    .shift(1)
+    .rolling(window=4)
+    .mean()
+)
+
+df["variacao_casos_1s"] = (
+    df["casos_confirmados"].shift(1)
+    - df["casos_confirmados"].shift(2)
+)
+
+df["semana_ano"] = df["data_semana"].dt.isocalendar().week.astype(int)
+
+df["semana_sin"] = np.sin(
+    2 * np.pi * df["semana_ano"] / 52
+)
+
+df["semana_cos"] = np.cos(
+    2 * np.pi * df["semana_ano"] / 52
+)
+
 features_baseline = [
     "temp_min_lag_1",
     "umidade_lag_1",
@@ -88,7 +121,16 @@ features_baseline = [
     "casos_lag_3"
 ]
 
-colunas_obrigatorias = ["casos_confirmados"] + features_baseline
+features_enriquecidas = features_baseline + [
+    "casos_media_2s",
+    "casos_media_4s",
+    "variacao_casos_1s",
+    "semana_sin",
+    "semana_cos"
+]
+
+
+colunas_obrigatorias = ["casos_confirmados"] + features_enriquecidas
 df = df.dropna(subset=colunas_obrigatorias).reset_index(drop=True)
 
 if len(df) < 80:
@@ -157,8 +199,18 @@ def walk_forward_backtest(
     return pd.DataFrame(resultados)
 
 # ==============================================================================
-# 5. CONFIGURAÇÕES A COMPARAR
+# 5. CONFIGURAÇÕES E CONJUNTOS DE FEATURES A COMPARAR
 # ==============================================================================
+
+# Duas versões da matriz de entrada:
+# - Baseline: 12 variáveis já utilizadas no modelo atual.
+# - Enriquecida: baseline + tendência recente + sazonalidade anual.
+conjuntos_features = {
+    "baseline_12_features": features_baseline,
+    "enriquecido_17_features": features_enriquecidas
+}
+
+# Dois conjuntos de hiperparâmetros do XGBoost.
 configuracoes = {
     "XGBoost_baseline_colab": {
         "learning_rate": 0.2,
@@ -177,64 +229,67 @@ configuracoes = {
 # ==============================================================================
 resumo = []
 
-for nome, parametros in configuracoes.items():
-    print("\n" + "=" * 75)
-    print(f"AVALIANDO: {nome}")
-    print("=" * 75)
+for nome_features, features_atuais in conjuntos_features.items():
+    for nome_modelo, parametros in configuracoes.items():
+        print("\n" + "=" * 75)
+        print(f"CONJUNTO: {nome_features}")
+        print(f"MODELO: {nome_modelo}")
+        print("=" * 75)
 
-    for horizonte in [1, 2]:
-        resultado = walk_forward_backtest(
-            dados=df,
-            features=features_baseline,
-            parametros=parametros,
-            horizonte=horizonte,
-            semanas_teste=52,
-            minimo_treino=120
-        )
+        for horizonte in [1, 2]:
+            resultado = walk_forward_backtest(
+                dados=df,
+                features=features_atuais,
+                parametros=parametros,
+                horizonte=horizonte,
+                semanas_teste=52,
+                minimo_treino=120
+            )
 
-        mae = mean_absolute_error(
-            resultado["casos_reais"],
-            resultado["casos_previstos"]
-        )
-
-        rmse = np.sqrt(
-            mean_squared_error(
+            mae = mean_absolute_error(
                 resultado["casos_reais"],
                 resultado["casos_previstos"]
             )
-        )
 
-        r2 = r2_score(
-            resultado["casos_reais"],
-            resultado["casos_previstos"]
-        )
+            rmse = np.sqrt(
+                mean_squared_error(
+                    resultado["casos_reais"],
+                    resultado["casos_previstos"]
+                )
+            )
 
-        vies = resultado["erro_assinado"].mean()
+            r2 = r2_score(
+                resultado["casos_reais"],
+                resultado["casos_previstos"]
+            )
 
-        resumo.append({
-            "modelo": nome,
-            "horizonte_semanas": horizonte,
-            "amostras": len(resultado),
-            "r2": round(r2, 4),
-            "mae": round(mae, 2),
-            "rmse": round(rmse, 2),
-            "vies_medio": round(vies, 2)
-        })
+            vies = resultado["erro_assinado"].mean()
 
-        print(
-            f"Horizonte {horizonte} semana(s) | "
-            f"amostras={len(resultado)} | "
-            f"R²={r2:.4f} | "
-            f"MAE={mae:.2f} | "
-            f"RMSE={rmse:.2f} | "
-            f"viés={vies:.2f}"
-        )
+            resumo.append({
+                "features": nome_features,
+                "modelo": nome_modelo,
+                "horizonte_semanas": horizonte,
+                "amostras": len(resultado),
+                "r2": round(r2, 4),
+                "mae": round(mae, 2),
+                "rmse": round(rmse, 2),
+                "vies_medio": round(vies, 2)
+            })
+
+            print(
+                f"Horizonte {horizonte} semana(s) | "
+                f"amostras={len(resultado)} | "
+                f"R²={r2:.4f} | "
+                f"MAE={mae:.2f} | "
+                f"RMSE={rmse:.2f} | "
+                f"viés={vies:.2f}"
+            )
 
 df_resumo = pd.DataFrame(resumo).sort_values(
     ["horizonte_semanas", "rmse", "mae"]
 )
 
-print("\n" + "=" * 75)
-print("RESUMO FINAL — WALK-FORWARD BACKTEST")
-print("=" * 75)
+print("\n" + "=" * 90)
+print("RESUMO FINAL — WALK-FORWARD BACKTEST: BASELINE VS TENDÊNCIA/SAZONALIDADE")
+print("=" * 90)
 print(df_resumo.to_string(index=False))
