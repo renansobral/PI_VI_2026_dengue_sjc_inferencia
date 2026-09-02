@@ -1,6 +1,6 @@
 # ==============================================================================
 # PROJETO INTEGRADOR IV - UNIVESP
-# MOTOR DE INFERÊNCIA E INGESTÃO DE DADOS (VERSÃO FINAL)
+# MOTOR DE INFERÊNCIA E INGESTÃO DE DADOS (VERSÃO FINAL - 17 FEATURES)
 # ==============================================================================
 import pandas as pd
 import numpy as np
@@ -104,18 +104,57 @@ for lag in [1, 2, 3]:
     df[f"temp_min_lag_{lag}"] = df["temperatura_minima"].shift(lag)
     df[f"umidade_lag_{lag}"] = df["umidade_maxima"].shift(lag)
 
-# Remover NaNs (primeiras 3 semanas)
+# ==============================================================================
+# 4.1 FEATURES EXPERIMENTAIS: TENDÊNCIA E SAZONALIDADE
+# ==============================================================================
+df["casos_media_2s"] = (
+    df["casos_confirmados"]
+    .shift(1)
+    .rolling(window=2)
+    .mean()
+)
+
+df["casos_media_4s"] = (
+    df["casos_confirmados"]
+    .shift(1)
+    .rolling(window=4)
+    .mean()
+)
+
+df["variacao_casos_1s"] = (
+    df["casos_confirmados"].shift(1)
+    - df["casos_confirmados"].shift(2)
+)
+
+df["semana_ano"] = df["data_semana"].dt.isocalendar().week.astype(int)
+
+df["semana_sin"] = np.sin(
+    2 * np.pi * df["semana_ano"] / 52
+)
+
+df["semana_cos"] = np.cos(
+    2 * np.pi * df["semana_ano"] / 52
+)
+
+# Remover NaNs (primeiras semanas sem lags e sem médias móveis)
 df = df.dropna().reset_index(drop=True)
 
 # ==============================================================================
-# 5. PREPARAR FEATURES PARA TREINAMENTO
+# 5. PREPARAR FEATURES PARA TREINAMENTO (17 VARIÁVEIS)
 # ==============================================================================
 features = [
+    # Lags de clima
     'temp_min_lag_1', 'umidade_lag_1',
     'temp_min_lag_2', 'umidade_lag_2',
     'temp_min_lag_3', 'umidade_lag_3',
+    # Infraestrutura e ADL
     'densidade_populacional', 'taxa_coleta_residuos', 'indice_breteu_adl',
-    'casos_lag_1', 'casos_lag_2', 'casos_lag_3'
+    # Lags de casos
+    'casos_lag_1', 'casos_lag_2', 'casos_lag_3',
+    # Tendência recente
+    'casos_media_2s', 'casos_media_4s', 'variacao_casos_1s',
+    # Sazonalidade anual
+    'semana_sin', 'semana_cos'
 ]
 
 # Recorte D-60 (esconder últimos 60 dias)
@@ -128,7 +167,7 @@ y = df_treino['casos_confirmados']
 print(f"IA treinada com dados até: {df_treino['data_semana'].max().strftime('%d/%m/%Y')}")
 
 # ==============================================================================
-# 6. TREINAR MODELO XGBOOST
+# 6. TREINAR MODELO XGBOOST (HIPERPARÂMETROS VENCEDORES)
 # ==============================================================================
 modelo_producao = xgb.XGBRegressor(
     learning_rate=0.2,
@@ -166,7 +205,7 @@ ss_tot = np.sum((y_teste - np.mean(y_teste)) ** 2)
 r2_backtest = 1 - (ss_res / ss_tot)
 
 print("=" * 65)
-print("RESULTADO DO BACKTESTING TEMPORAL — XGBOOST")
+print("RESULTADO DO BACKTESTING TEMPORAL — XGBOOST (17 FEATURES)")
 print("=" * 65)
 print(f"Período de teste: {df_teste['data_semana'].min().strftime('%d/%m/%Y')} "
       f"até {df_teste['data_semana'].max().strftime('%d/%m/%Y')}")
@@ -186,7 +225,7 @@ resultado_backtest = pd.DataFrame({
 print(resultado_backtest.to_string(index=False))
 
 # ==============================================================================
-# 7.1 BACKTEST RECURSIVO DE 2 SEMANAS
+# 7.1 BACKTEST RECURSIVO DE 2 SEMANAS (17 FEATURES)
 # ==============================================================================
 print("Iniciando backtest recursivo de duas semanas...")
 
@@ -210,7 +249,14 @@ for i in range(min(2, len(df_teste_recursivo))):
         "indice_breteu_adl": [linha_futura["indice_breteu_adl"]],
         "casos_lag_1": [historico["casos_confirmados"].iloc[-1]],
         "casos_lag_2": [historico["casos_confirmados"].iloc[-2]],
-        "casos_lag_3": [historico["casos_confirmados"].iloc[-3]]
+        "casos_lag_3": [historico["casos_confirmados"].iloc[-3]],
+        "casos_media_2s": [historico["casos_confirmados"].shift(1).iloc[-2:].mean()],
+        "casos_media_4s": [historico["casos_confirmados"].shift(1).iloc[-4:].mean()],
+        "variacao_casos_1s": [
+            historico["casos_confirmados"].iloc[-2] - historico["casos_confirmados"].iloc[-3]
+        ],
+        "semana_sin": [np.sin(2 * np.pi * linha_futura["data_semana"].dt.isocalendar().week / 52)],
+        "semana_cos": [np.cos(2 * np.pi * linha_futura["data_semana"].dt.isocalendar().week / 52)]
     })[features]
 
     previsao = float(modelo_producao.predict(X_futuro)[0])
@@ -232,16 +278,13 @@ for i in range(min(2, len(df_teste_recursivo))):
 df_backtest_recursivo = pd.DataFrame(resultados_recursivos)
 
 print("=" * 65)
-print("BACKTEST RECURSIVO — HORIZONTE DE DUAS SEMANAS")
+print("BACKTEST RECURSIVO — HORIZONTE DE DUAS SEMANAS (17 FEATURES)")
 print("=" * 65)
 print(df_backtest_recursivo.to_string(index=False))
 print("=" * 65)
 
-
-
-
 # ==============================================================================
-# 8. GERAR PREDIÇÃO PARA PRÓXIMAS 2 SEMANAS
+# 8. GERAR PREDIÇÃO PARA PRÓXIMAS 2 SEMANAS (17 FEATURES)
 # ==============================================================================
 print("Gerando predições...")
 
@@ -250,34 +293,77 @@ ultima_semana = df.iloc[-1]
 
 # Preparar features para predição
 X_future = pd.DataFrame({
+    # Lags de clima
     "temp_min_lag_1": [df["temperatura_minima"].iloc[-1]],
     "umidade_lag_1": [df["umidade_maxima"].iloc[-1]],
-
     "temp_min_lag_2": [df["temperatura_minima"].iloc[-2]],
     "umidade_lag_2": [df["umidade_maxima"].iloc[-2]],
-
     "temp_min_lag_3": [df["temperatura_minima"].iloc[-3]],
     "umidade_lag_3": [df["umidade_maxima"].iloc[-3]],
-
+    # Infraestrutura e ADL
     "densidade_populacional": [df["densidade_populacional"].iloc[-1]],
     "taxa_coleta_residuos": [df["taxa_coleta_residuos"].iloc[-1]],
     "indice_breteu_adl": [df["indice_breteu_adl"].iloc[-1]],
-
+    # Lags de casos
     "casos_lag_1": [df["casos_confirmados"].iloc[-1]],
     "casos_lag_2": [df["casos_confirmados"].iloc[-2]],
-    "casos_lag_3": [df["casos_confirmados"].iloc[-3]]
+    "casos_lag_3": [df["casos_confirmados"].iloc[-3]],
+    # Tendência recente
+    "casos_media_2s": [
+        df["casos_confirmados"].shift(1).iloc[-2:].mean()
+    ],
+    "casos_media_4s": [
+        df["casos_confirmados"].shift(1).iloc[-4:].mean()
+    ],
+    "variacao_casos_1s": [
+        df["casos_confirmados"].iloc[-2] - df["casos_confirmados"].iloc[-3]
+    ],
+    # Sazonalidade anual
+    "semana_sin": [np.sin(2 * np.pi * ultima_semana["data_semana"].dt.isocalendar().week / 52)],
+    "semana_cos": [np.cos(2 * np.pi * ultima_semana["data_semana"].dt.isocalendar().week / 52)]
 })
 
 # Garante, explicitamente, a mesma ordem usada no treinamento.
 X_future = X_future[features]
 predicao_semana_1 = modelo_producao.predict(X_future)[0]
 
-# Semana 2: desloca a janela autorregressiva de casos.
+# Semana 2: desloca a janela autorregressiva de casos e atualiza tendência.
 X_future_2 = X_future.copy()
 
+# Atualiza lags de casos
 X_future_2["casos_lag_1"] = predicao_semana_1
 X_future_2["casos_lag_2"] = df["casos_confirmados"].iloc[-1]
 X_future_2["casos_lag_3"] = df["casos_confirmados"].iloc[-2]
+
+# Atualiza médias móveis de casos (tendência)
+casos_com_shift = df["casos_confirmados"].shift(1)
+X_future_2["casos_media_2s"] = (
+    pd.Series([casos_com_shift.iloc[-2], casos_com_shift.iloc[-1], predicao_semana_1])
+    .iloc[-2:]
+    .mean()
+)
+
+X_future_2["casos_media_4s"] = (
+    pd.Series([
+        casos_com_shift.iloc[-4],
+        casos_com_shift.iloc[-3],
+        casos_com_shift.iloc[-2],
+        casos_com_shift.iloc[-1],
+        predicao_semana_1
+    ])
+    .iloc[-4:]
+    .mean()
+)
+
+# Atualiza variação de casos
+X_future_2["variacao_casos_1s"] = (
+    predicao_semana_1 - df["casos_confirmados"].iloc[-2]
+)
+
+# Atualiza sazonalidade para a semana seguinte
+semana_ano_2 = (ultima_semana["data_semana"] + pd.Timedelta(days=7)).dt.isocalendar().week
+X_future_2["semana_sin"] = [np.sin(2 * np.pi * semana_ano_2 / 52)]
+X_future_2["semana_cos"] = [np.cos(2 * np.pi * semana_ano_2 / 52)]
 
 X_future_2 = X_future_2[features]
 
@@ -298,14 +384,14 @@ supabase.table("predicoes_dengue").insert({
     "semana_predita": int(data_semana_1.strftime('%Y%m')),
     "data_predicao": data_semana_1.strftime('%Y-%m-%d'),
     "casos_previstos": int(predicao_semana_1),
-    "modelo_usado": "XGBoost_v1_github_actions"
+    "modelo_usado": "XGBoost_v2_17features_github_actions"
 }).execute()
 
 supabase.table("predicoes_dengue").insert({
     "semana_predita": int(data_semana_2.strftime('%Y%m')),
     "data_predicao": data_semana_2.strftime('%Y-%m-%d'),
     "casos_previstos": int(predicao_semana_2),
-    "modelo_usado": "XGBoost_v1_github_actions"
+    "modelo_usado": "XGBoost_v2_17features_github_actions"
 }).execute()
 
 print("✅ Predições salvas no Supabase!")
