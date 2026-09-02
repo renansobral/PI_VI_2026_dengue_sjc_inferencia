@@ -237,6 +237,9 @@ resultados_recursivos = []
 for i in range(min(2, len(df_teste_recursivo))):
     linha_futura = df_teste_recursivo.iloc[i]
 
+    # Semana do ano para a data futura ( Timestamp direto, sem .dt )
+    semana_ano_futura = int(linha_futura["data_semana"].isocalendar().week)
+
     X_futuro = pd.DataFrame({
         "temp_min_lag_1": [historico["temperatura_minima"].iloc[-1]],
         "umidade_lag_1": [historico["umidade_maxima"].iloc[-1]],
@@ -255,8 +258,8 @@ for i in range(min(2, len(df_teste_recursivo))):
         "variacao_casos_1s": [
             historico["casos_confirmados"].iloc[-2] - historico["casos_confirmados"].iloc[-3]
         ],
-        "semana_sin": [np.sin(2 * np.pi * linha_futura["data_semana"].dt.isocalendar().week / 52)],
-        "semana_cos": [np.cos(2 * np.pi * linha_futura["data_semana"].dt.isocalendar().week / 52)]
+        "semana_sin": [np.sin(2 * np.pi * semana_ano_futura / 52)],
+        "semana_cos": [np.cos(2 * np.pi * semana_ano_futura / 52)]
     })[features]
 
     previsao = float(modelo_producao.predict(X_futuro)[0])
