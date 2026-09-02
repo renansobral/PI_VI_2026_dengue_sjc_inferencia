@@ -97,16 +97,14 @@ print(
     f"{df_adl['data_referencia'].max().strftime('%d/%m/%Y')}")
     
 # ==============================================================================
-# 4. ENGENHARIA DE RECURSOS (LAG FEATURES)
+# 4. ENGENHARIA DE RECURSOS (LAG FEATURES + TENDÊNCIA + SAZONALIDADE)
 # ==============================================================================
 for lag in [1, 2, 3]:
     df[f"casos_lag_{lag}"] = df["casos_confirmados"].shift(lag)
     df[f"temp_min_lag_{lag}"] = df["temperatura_minima"].shift(lag)
     df[f"umidade_lag_{lag}"] = df["umidade_maxima"].shift(lag)
 
-# ==============================================================================
-# 4.1 FEATURES EXPERIMENTAIS: TENDÊNCIA E SAZONALIDADE
-# ==============================================================================
+# Features de tendência e sazonalidade
 df["casos_media_2s"] = (
     df["casos_confirmados"]
     .shift(1)
@@ -140,7 +138,7 @@ df["semana_cos"] = np.cos(
 df = df.dropna().reset_index(drop=True)
 
 # ==============================================================================
-# 5. PREPARAR FEATURES PARA TREINAMENTO (17 VARIÁVEIS)
+# 5. DEFINIÇÃO DAS 17 FEATURES
 # ==============================================================================
 features = [
     # Lags de clima
@@ -157,148 +155,170 @@ features = [
     'semana_sin', 'semana_cos'
 ]
 
-# Recorte D-60 (esconder últimos 60 dias)
-data_limite = df['data_semana'].max() - pd.Timedelta(days=60)
-df_treino = df[df['data_semana'] <= data_limite]
+# ==============================================================================
+# 6. BACKTESTING WALK-FORWARD (ÚLTIMAS 52 SEMANAS)
+# ==============================================================================
+print("Iniciando backtesting walk-forward (últimas 52 semanas)...")
 
-X = df_treino[features]
-y = df_treino['casos_confirmados']
+# Garantir que há pelo menos 52 semanas após o início da série
+if len(df) < 104:
+    raise RuntimeError(
+        "Série temporal muito curta para backtest de 52 semanas. "
+        f"Atualmente há {len(df)} semanas válidas."
+    )
 
-print(f"IA treinada com dados até: {df_treino['data_semana'].max().strftime('%d/%m/%Y')}")
+# Definir janela de backtest
+janela_backtest = 52
+df_backtest = df.iloc[-janela_backtest:].copy().reset_index(drop=True)
+
+# Histórico inicial: todos os dados antes da janela de backtest
+historico = df.iloc[:-janela_backtest].copy().reset_index(drop=True)
+
+resultados_backtest = []
+
+for i in range(len(df_backtest)):
+    linha_alvo = df_backtest.iloc[i]
+    data_alvo = linha_alvo["data_semana"]
+
+    # Construir features para a semana alvo usando apenas dados até i-1
+    # Precisamos dos últimos 3 valores de casos, clima e das médias móveis
+    if len(historico) < 4:
+        # Não há histórico suficiente para calcular todas as features
+        historico = pd.concat([historico, linha_alvo.to_frame().T], ignore_index=True)
+        continue
+
+    # Lags de clima
+    temp_min_lag_1 = historico["temperatura_minima"].iloc[-1]
+    umidade_lag_1 = historico["umidade_maxima"].iloc[-1]
+    temp_min_lag_2 = historico["temperatura_minima"].iloc[-2]
+    umidade_lag_2 = historico["umidade_maxima"].iloc[-2]
+    temp_min_lag_3 = historico["temperatura_minima"].iloc[-3]
+    umidade_lag_3 = historico["umidade_maxima"].iloc[-3]
+
+    # Lags de casos
+    casos_lag_1 = historico["casos_confirmados"].iloc[-1]
+    casos_lag_2 = historico["casos_confirmados"].iloc[-2]
+    casos_lag_3 = historico["casos_confirmados"].iloc[-3]
+
+    # Tendência
+    casos_com_shift = historico["casos_confirmados"].shift(1)
+    casos_media_2s = casos_com_shift.iloc[-2:].mean()
+    casos_media_4s = casos_com_shift.iloc[-4:].mean()
+    variacao_casos_1s = historico["casos_confirmados"].iloc[-2] - historico["casos_confirmados"].iloc[-3]
+
+    # Sazonalidade
+    semana_ano_alvo = int(linha_alvo["data_semana"].isocalendar().week)
+    semana_sin = np.sin(2 * np.pi * semana_ano_alvo / 52)
+    semana_cos = np.cos(2 * np.pi * semana_ano_alvo / 52)
+
+    X_alvo = pd.DataFrame({
+        'temp_min_lag_1': [temp_min_lag_1],
+        'umidade_lag_1': [umidade_lag_1],
+        'temp_min_lag_2': [temp_min_lag_2],
+        'umidade_lag_2': [umidade_lag_2],
+        'temp_min_lag_3': [temp_min_lag_3],
+        'umidade_lag_3': [umidade_lag_3],
+        'densidade_populacional': [linha_alvo["densidade_populacional"]],
+        'taxa_coleta_residuos': [linha_alvo["taxa_coleta_residuos"]],
+        'indice_breteu_adl': [linha_alvo["indice_breteu_adl"]],
+        'casos_lag_1': [casos_lag_1],
+        'casos_lag_2': [casos_lag_2],
+        'casos_lag_3': [casos_lag_3],
+        'casos_media_2s': [casos_media_2s],
+        'casos_media_4s': [casos_media_4s],
+        'variacao_casos_1s': [variacao_casos_1s],
+        'semana_sin': [semana_sin],
+        'semana_cos': [semana_cos]
+    })[features]
+
+    # Treinar modelo com todos os dados até i-1 (retreinamento a cada semana)
+    X_treino = historico[features]
+    y_treino = historico["casos_confirmados"]
+
+    modelo_backtest = xgb.XGBRegressor(
+        learning_rate=0.2,
+        max_depth=3,
+        n_estimators=200,
+        random_state=42
+    )
+    modelo_backtest.fit(X_treino, y_treino)
+
+    previsao = float(modelo_backtest.predict(X_alvo)[0])
+    previsao = max(0, previsao)
+
+    resultados_backtest.append({
+        "data_semana": data_alvo.strftime("%Y-%m-%d"),
+        "casos_reais": int(linha_alvo["casos_confirmados"]),
+        "casos_previstos": round(previsao, 2),
+        "erro_absoluto": round(abs(linha_alvo["casos_confirmados"] - previsao), 2)
+    })
+
+    # Adicionar semana real ao histórico para a próxima iteração
+    historico = pd.concat([historico, linha_alvo.to_frame().T], ignore_index=True)
+
+df_resultados_backtest = pd.DataFrame(resultados_backtest)
+
+if len(df_resultados_backtest) > 0:
+    y_real = df_resultados_backtest["casos_reais"].values
+    y_pred = df_resultados_backtest["casos_previstos"].values
+
+    mae_backtest = np.mean(np.abs(y_real - y_pred))
+    rmse_backtest = np.sqrt(np.mean((y_real - y_pred) ** 2))
+
+    ss_res = np.sum((y_real - y_pred) ** 2)
+    ss_tot = np.sum((y_real - np.mean(y_real)) ** 2)
+    r2_backtest = 1 - (ss_res / ss_tot) if ss_tot != 0 else np.nan
+
+    print("=" * 75)
+    print("RESULTADO DO BACKTESTING WALK-FORWARD — XGBOOST (17 FEATURES)")
+    print("=" * 75)
+    print(f"Período de teste: {df_resultados_backtest['data_semana'].iloc[0]} "
+          f"até {df_resultados_backtest['data_semana'].iloc[-1]}")
+    print(f"Semanas avaliadas: {len(df_resultados_backtest)}")
+    print(f"R²:   {r2_backtest:.4f}")
+    print(f"MAE:  {mae_backtest:.2f} casos")
+    print(f"RMSE: {rmse_backtest:.2f} casos")
+    print("=" * 75)
+    print(df_resultados_backtest.to_string(index=False))
+    print("=" * 75)
+else:
+    print("Nenhuma semana válida para backtest walk-forward.")
 
 # ==============================================================================
-# 6. TREINAR MODELO XGBOOST (HIPERPARÂMETROS VENCEDORES)
+# 7. TREINAR MODELO FINAL COM TODOS OS DADOS
 # ==============================================================================
+print("Treinando modelo final com todos os dados disponíveis...")
+
+X_final = df[features]
+y_final = df["casos_confirmados"]
+
 modelo_producao = xgb.XGBRegressor(
     learning_rate=0.2,
     max_depth=3,
     n_estimators=200,
     random_state=42
 )
-modelo_producao.fit(X, y)
+modelo_producao.fit(X_final, y_final)
 
-print("✅ Modelo XGBoost treinado!")
-
-# ==============================================================================
-# 7. BACKTESTING TEMPORAL (AVALIAÇÃO EM DADOS FUTUROS JÁ CONHECIDOS)
-# ==============================================================================
-print("Iniciando backtesting temporal...")
-
-df_teste = df[df["data_semana"] > data_limite].copy()
-
-if df_teste.empty:
-    raise RuntimeError(
-        "Não existem semanas posteriores ao corte D-60 para avaliar o backtest."
-    )
-
-X_teste = df_teste[features]
-y_teste = df_teste["casos_confirmados"]
-
-predicoes_backtest = modelo_producao.predict(X_teste)
-predicoes_backtest = np.maximum(predicoes_backtest, 0)
-
-mae_backtest = np.mean(np.abs(y_teste - predicoes_backtest))
-rmse_backtest = np.sqrt(np.mean((y_teste - predicoes_backtest) ** 2))
-
-ss_res = np.sum((y_teste - predicoes_backtest) ** 2)
-ss_tot = np.sum((y_teste - np.mean(y_teste)) ** 2)
-r2_backtest = 1 - (ss_res / ss_tot)
-
-print("=" * 65)
-print("RESULTADO DO BACKTESTING TEMPORAL — XGBOOST (17 FEATURES)")
-print("=" * 65)
-print(f"Período de teste: {df_teste['data_semana'].min().strftime('%d/%m/%Y')} "
-      f"até {df_teste['data_semana'].max().strftime('%d/%m/%Y')}")
-print(f"Semanas avaliadas: {len(df_teste)}")
-print(f"R²:   {r2_backtest:.4f}")
-print(f"MAE:  {mae_backtest:.2f} casos")
-print(f"RMSE: {rmse_backtest:.2f} casos")
-print("=" * 65)
-
-resultado_backtest = pd.DataFrame({
-    "data_semana": df_teste["data_semana"].dt.strftime("%Y-%m-%d"),
-    "casos_reais": y_teste.values,
-    "casos_previstos": np.round(predicoes_backtest, 2),
-    "erro_absoluto": np.round(np.abs(y_teste.values - predicoes_backtest), 2)
-})
-
-print(resultado_backtest.to_string(index=False))
+print(f"✅ Modelo XGBoost treinado com {len(df)} semanas!")
 
 # ==============================================================================
-# 7.1 BACKTEST RECURSIVO DE 2 SEMANAS (17 FEATURES)
+# 8. GERAR PREDIÇÃO PARA A PRÓXIMA SEMANA (QUE AINDA NÃO EXISTE NA BASE)
 # ==============================================================================
-print("Iniciando backtest recursivo de duas semanas...")
+print("Gerando predição para a próxima semana...")
 
-df_teste_recursivo = df[df["data_semana"] > data_limite].copy().reset_index(drop=True)
-
-historico = df_treino.copy()
-resultados_recursivos = []
-
-for i in range(min(2, len(df_teste_recursivo))):
-    linha_futura = df_teste_recursivo.iloc[i]
-
-    # Semana do ano para a data futura ( Timestamp direto, sem .dt )
-    semana_ano_futura = int(linha_futura["data_semana"].isocalendar().week)
-
-    X_futuro = pd.DataFrame({
-        "temp_min_lag_1": [historico["temperatura_minima"].iloc[-1]],
-        "umidade_lag_1": [historico["umidade_maxima"].iloc[-1]],
-        "temp_min_lag_2": [historico["temperatura_minima"].iloc[-2]],
-        "umidade_lag_2": [historico["umidade_maxima"].iloc[-2]],
-        "temp_min_lag_3": [historico["temperatura_minima"].iloc[-3]],
-        "umidade_lag_3": [historico["umidade_maxima"].iloc[-3]],
-        "densidade_populacional": [linha_futura["densidade_populacional"]],
-        "taxa_coleta_residuos": [linha_futura["taxa_coleta_residuos"]],
-        "indice_breteu_adl": [linha_futura["indice_breteu_adl"]],
-        "casos_lag_1": [historico["casos_confirmados"].iloc[-1]],
-        "casos_lag_2": [historico["casos_confirmados"].iloc[-2]],
-        "casos_lag_3": [historico["casos_confirmados"].iloc[-3]],
-        "casos_media_2s": [historico["casos_confirmados"].shift(1).iloc[-2:].mean()],
-        "casos_media_4s": [historico["casos_confirmados"].shift(1).iloc[-4:].mean()],
-        "variacao_casos_1s": [
-            historico["casos_confirmados"].iloc[-2] - historico["casos_confirmados"].iloc[-3]
-        ],
-        "semana_sin": [np.sin(2 * np.pi * semana_ano_futura / 52)],
-        "semana_cos": [np.cos(2 * np.pi * semana_ano_futura / 52)]
-    })[features]
-
-    previsao = float(modelo_producao.predict(X_futuro)[0])
-    previsao = max(0, previsao)
-
-    resultados_recursivos.append({
-        "horizonte": i + 1,
-        "data_semana": linha_futura["data_semana"].strftime("%Y-%m-%d"),
-        "casos_reais": int(linha_futura["casos_confirmados"]),
-        "casos_previstos": round(previsao, 2),
-        "erro_absoluto": round(abs(linha_futura["casos_confirmados"] - previsao), 2)
-    })
-
-    # Para a segunda semana, a previsão substitui o caso real no histórico.
-    nova_linha = linha_futura.to_frame().T
-    nova_linha["casos_confirmados"] = previsao
-    historico = pd.concat([historico, nova_linha], ignore_index=True)
-
-df_backtest_recursivo = pd.DataFrame(resultados_recursivos)
-
-print("=" * 65)
-print("BACKTEST RECURSIVO — HORIZONTE DE DUAS SEMANAS (17 FEATURES)")
-print("=" * 65)
-print(df_backtest_recursivo.to_string(index=False))
-print("=" * 65)
-
-# ==============================================================================
-# 8. GERAR PREDIÇÃO PARA PRÓXIMAS 2 SEMANAS (17 FEATURES)
-# ==============================================================================
-print("Gerando predições...")
-
-# Pegar última semana disponível
+# Última semana disponível na base
 ultima_semana = df.iloc[-1]
+data_ultima = ultima_semana["data_semana"]
 
-# Semana do ano da última semana (Timestamp direto, sem .dt)
-semana_ano_ultima = int(ultima_semana["data_semana"].isocalendar().week)
+# Próxima semana (ainda não existe na base)
+proxima_semana = data_ultima + pd.Timedelta(days=7)
 
-# Preparar features para predição
-X_future = pd.DataFrame({
+# Semana do ano da próxima semana (Timestamp direto, sem .dt)
+semana_ano_proxima = int(proxima_semana.isocalendar().week)
+
+# Construir features para a próxima semana
+X_futuro = pd.DataFrame({
     # Lags de clima
     "temp_min_lag_1": [df["temperatura_minima"].iloc[-1]],
     "umidade_lag_1": [df["umidade_maxima"].iloc[-1]],
@@ -325,80 +345,26 @@ X_future = pd.DataFrame({
         df["casos_confirmados"].iloc[-2] - df["casos_confirmados"].iloc[-3]
     ],
     # Sazonalidade anual
-    "semana_sin": [np.sin(2 * np.pi * semana_ano_ultima / 52)],
-    "semana_cos": [np.cos(2 * np.pi * semana_ano_ultima / 52)]
-})
+    "semana_sin": [np.sin(2 * np.pi * semana_ano_proxima / 52)],
+    "semana_cos": [np.cos(2 * np.pi * semana_ano_proxima / 52)]
+})[features]
 
-# Garante, explicitamente, a mesma ordem usada no treinamento.
-X_future = X_future[features]
-predicao_semana_1 = modelo_producao.predict(X_future)[0]
+predicao_proxima_semana = modelo_producao.predict(X_futuro)[0]
+predicao_proxima_semana = max(0, predicao_proxima_semana)
 
-# Semana 2: desloca a janela autorregressiva de casos e atualiza tendência.
-X_future_2 = X_future.copy()
-
-# Atualiza lags de casos
-X_future_2["casos_lag_1"] = predicao_semana_1
-X_future_2["casos_lag_2"] = df["casos_confirmados"].iloc[-1]
-X_future_2["casos_lag_3"] = df["casos_confirmados"].iloc[-2]
-
-# Atualiza médias móveis de casos (tendência)
-casos_com_shift = df["casos_confirmados"].shift(1)
-X_future_2["casos_media_2s"] = (
-    pd.Series([casos_com_shift.iloc[-2], casos_com_shift.iloc[-1], predicao_semana_1])
-    .iloc[-2:]
-    .mean()
-)
-
-X_future_2["casos_media_4s"] = (
-    pd.Series([
-        casos_com_shift.iloc[-4],
-        casos_com_shift.iloc[-3],
-        casos_com_shift.iloc[-2],
-        casos_com_shift.iloc[-1],
-        predicao_semana_1
-    ])
-    .iloc[-4:]
-    .mean()
-)
-
-# Atualiza variação de casos
-X_future_2["variacao_casos_1s"] = (
-    predicao_semana_1 - df["casos_confirmados"].iloc[-2]
-)
-
-# Atualiza sazonalidade para a semana seguinte
-semana_ano_2 = int((ultima_semana["data_semana"] + pd.Timedelta(days=7)).isocalendar().week)
-X_future_2["semana_sin"] = [np.sin(2 * np.pi * semana_ano_2 / 52)]
-X_future_2["semana_cos"] = [np.cos(2 * np.pi * semana_ano_2 / 52)]
-
-X_future_2 = X_future_2[features]
-
-predicao_semana_2 = modelo_producao.predict(X_future_2)[0]
-print(f"Predição semana 1: {predicao_semana_1:.0f} casos")
-print(f"Predição semana 2: {predicao_semana_2:.0f} casos")
+print(f"Predição para {proxima_semana.strftime('%d/%m/%Y')}: {predicao_proxima_semana:.0f} casos")
 
 # ==============================================================================
-# 9. SALVAR PREDIÇÕES NO SUPABASE (TABELA: predicoes_dengue)
+# 9. SALVAR PREDIÇÃO NO SUPABASE (TABELA: predicoes_dengue)
 # ==============================================================================
-data_ultima = ultima_semana['data_semana']
-data_semana_1 = data_ultima + pd.Timedelta(days=7)
-data_semana_2 = data_ultima + pd.Timedelta(days=14)
-
-print("Salvando predições no Supabase...")
+print("Salvando predição no Supabase...")
 
 supabase.table("predicoes_dengue").insert({
-    "semana_predita": int(data_semana_1.strftime('%Y%m')),
-    "data_predicao": data_semana_1.strftime('%Y-%m-%d'),
-    "casos_previstos": int(predicao_semana_1),
-    "modelo_usado": "XGBoost_v2_17features_github_actions"
+    "semana_predita": int(proxima_semana.strftime('%Y%m')),
+    "data_predicao": proxima_semana.strftime('%Y-%m-%d'),
+    "casos_previstos": int(predicao_proxima_semana),
+    "modelo_usado": "XGBoost_v2_17features_walkforward_52s"
 }).execute()
 
-supabase.table("predicoes_dengue").insert({
-    "semana_predita": int(data_semana_2.strftime('%Y%m')),
-    "data_predicao": data_semana_2.strftime('%Y-%m-%d'),
-    "casos_previstos": int(predicao_semana_2),
-    "modelo_usado": "XGBoost_v2_17features_github_actions"
-}).execute()
-
-print("✅ Predições salvas no Supabase!")
+print("✅ Predição salva no Supabase!")
 print("🎉 Pipeline finalizado com sucesso!")
