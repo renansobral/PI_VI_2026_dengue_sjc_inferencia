@@ -95,7 +95,7 @@ df = df.drop(columns=['data_referencia'])
 
 print(
     f"ADL mesclado com sucesso. Último ciclo usado: "
-    f"{df_adl['data_referencia'].max().strftime('%d/%m/%Y')}"
+    f"{df_adl['data_referencia'].max().strftime('%d/%m/%Y')}")
     
 # ==============================================================================
 # 4. ENGENHARIA DE RECURSOS (LAG FEATURES)
