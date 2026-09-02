@@ -131,9 +131,9 @@ print(f"IA treinada com dados até: {df_treino['data_semana'].max().strftime('%d
 # 6. TREINAR MODELO XGBOOST
 # ==============================================================================
 modelo_producao = xgb.XGBRegressor(
-    learning_rate=0.05,
-    max_depth=7,
-    n_estimators=50,
+    learning_rate=0.2,
+    max_depth=3,
+    n_estimators=200,
     random_state=42
 )
 modelo_producao.fit(X, y)
