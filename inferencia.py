@@ -141,6 +141,106 @@ modelo_producao.fit(X, y)
 print("✅ Modelo XGBoost treinado!")
 
 # ==============================================================================
+# 7. BACKTESTING TEMPORAL (AVALIAÇÃO EM DADOS FUTUROS JÁ CONHECIDOS)
+# ==============================================================================
+print("Iniciando backtesting temporal...")
+
+df_teste = df[df["data_semana"] > data_limite].copy()
+
+if df_teste.empty:
+    raise RuntimeError(
+        "Não existem semanas posteriores ao corte D-60 para avaliar o backtest."
+    )
+
+X_teste = df_teste[features]
+y_teste = df_teste["casos_confirmados"]
+
+predicoes_backtest = modelo_producao.predict(X_teste)
+predicoes_backtest = np.maximum(predicoes_backtest, 0)
+
+mae_backtest = np.mean(np.abs(y_teste - predicoes_backtest))
+rmse_backtest = np.sqrt(np.mean((y_teste - predicoes_backtest) ** 2))
+
+ss_res = np.sum((y_teste - predicoes_backtest) ** 2)
+ss_tot = np.sum((y_teste - np.mean(y_teste)) ** 2)
+r2_backtest = 1 - (ss_res / ss_tot)
+
+print("=" * 65)
+print("RESULTADO DO BACKTESTING TEMPORAL — XGBOOST")
+print("=" * 65)
+print(f"Período de teste: {df_teste['data_semana'].min().strftime('%d/%m/%Y')} "
+      f"até {df_teste['data_semana'].max().strftime('%d/%m/%Y')}")
+print(f"Semanas avaliadas: {len(df_teste)}")
+print(f"R²:   {r2_backtest:.4f}")
+print(f"MAE:  {mae_backtest:.2f} casos")
+print(f"RMSE: {rmse_backtest:.2f} casos")
+print("=" * 65)
+
+resultado_backtest = pd.DataFrame({
+    "data_semana": df_teste["data_semana"].dt.strftime("%Y-%m-%d"),
+    "casos_reais": y_teste.values,
+    "casos_previstos": np.round(predicoes_backtest, 2),
+    "erro_absoluto": np.round(np.abs(y_teste.values - predicoes_backtest), 2)
+})
+
+print(resultado_backtest.to_string(index=False))
+
+# ==============================================================================
+# 7.1 BACKTEST RECURSIVO DE 2 SEMANAS
+# ==============================================================================
+print("Iniciando backtest recursivo de duas semanas...")
+
+df_teste_recursivo = df[df["data_semana"] > data_limite].copy().reset_index(drop=True)
+
+historico = df_treino.copy()
+resultados_recursivos = []
+
+for i in range(min(2, len(df_teste_recursivo))):
+    linha_futura = df_teste_recursivo.iloc[i]
+
+    X_futuro = pd.DataFrame({
+        "temp_min_lag_1": [historico["temperatura_minima"].iloc[-1]],
+        "umidade_lag_1": [historico["umidade_maxima"].iloc[-1]],
+        "temp_min_lag_2": [historico["temperatura_minima"].iloc[-2]],
+        "umidade_lag_2": [historico["umidade_maxima"].iloc[-2]],
+        "temp_min_lag_3": [historico["temperatura_minima"].iloc[-3]],
+        "umidade_lag_3": [historico["umidade_maxima"].iloc[-3]],
+        "densidade_populacional": [linha_futura["densidade_populacional"]],
+        "taxa_coleta_residuos": [linha_futura["taxa_coleta_residuos"]],
+        "indice_breteu_adl": [linha_futura["indice_breteu_adl"]],
+        "casos_lag_1": [historico["casos_confirmados"].iloc[-1]],
+        "casos_lag_2": [historico["casos_confirmados"].iloc[-2]],
+        "casos_lag_3": [historico["casos_confirmados"].iloc[-3]]
+    })[features]
+
+    previsao = float(modelo_producao.predict(X_futuro)[0])
+    previsao = max(0, previsao)
+
+    resultados_recursivos.append({
+        "horizonte": i + 1,
+        "data_semana": linha_futura["data_semana"].strftime("%Y-%m-%d"),
+        "casos_reais": int(linha_futura["casos_confirmados"]),
+        "casos_previstos": round(previsao, 2),
+        "erro_absoluto": round(abs(linha_futura["casos_confirmados"] - previsao), 2)
+    })
+
+    # Para a segunda semana, a previsão substitui o caso real no histórico.
+    nova_linha = linha_futura.to_frame().T
+    nova_linha["casos_confirmados"] = previsao
+    historico = pd.concat([historico, nova_linha], ignore_index=True)
+
+df_backtest_recursivo = pd.DataFrame(resultados_recursivos)
+
+print("=" * 65)
+print("BACKTEST RECURSIVO — HORIZONTE DE DUAS SEMANAS")
+print("=" * 65)
+print(df_backtest_recursivo.to_string(index=False))
+print("=" * 65)
+
+
+
+
+# ==============================================================================
 # 8. GERAR PREDIÇÃO PARA PRÓXIMAS 2 SEMANAS
 # ==============================================================================
 print("Gerando predições...")
