@@ -139,8 +139,17 @@ st.caption(
     "As estimativas não substituem os boletins oficiais."
 )
 
-casos = carregar_casos()
-predicoes = carregar_predicoes()
+try:
+    with st.spinner("Consultando dados epidemiológicos no Supabase..."):
+        casos = carregar_casos()
+
+    with st.spinner("Consultando previsões no Supabase..."):
+        predicoes = carregar_predicoes()
+
+except Exception as erro:
+    st.error("Não foi possível consultar o Supabase.")
+    st.exception(erro)
+    st.stop()
 
 if casos.empty:
     st.warning("Não foram encontrados dados epidemiológicos.")
@@ -345,4 +354,9 @@ st.markdown("---")
 st.caption(
     "Projeto Integrador IV — UNIVESP | "
     "Fonte epidemiológica: InfoDengue"
+)
+
+st.caption(
+    f"Atualização da página: "
+    f"{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
 )
