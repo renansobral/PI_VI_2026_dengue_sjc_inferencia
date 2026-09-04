@@ -1,0 +1,26 @@
+name: Simular Previsões Históricas — Dengue SJC
+
+on:
+  workflow_dispatch:
+
+jobs:
+  simular_previsoes:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar código do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependências do pipeline
+        run: pip install -r requirements-pipeline.txt
+
+      - name: Executar simulador histórico
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python simular_previsoes_historicas.py
