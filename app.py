@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -48,10 +49,7 @@ def carregar_casos():
     resposta = (
         supabase
         .table("casos_dengue_sjc")
-        .select(
-            "data_semana, casos_confirmados, "
-            "temperatura_minima, umidade_maxima"
-        )
+        .select("data_semana, casos_confirmados")
         .order("data_semana", desc=False)
         .execute()
     )
@@ -61,13 +59,23 @@ def carregar_casos():
     if dados.empty:
         return dados
 
-    dados["data_semana"] = pd.to_datetime(dados["data_semana"])
+    dados["data_semana"] = pd.to_datetime(
+        dados["data_semana"],
+        errors="coerce"
+    )
+
     dados["casos_confirmados"] = pd.to_numeric(
         dados["casos_confirmados"],
         errors="coerce"
     )
 
-    return dados.dropna(subset=["data_semana", "casos_confirmados"])
+    return (
+        dados
+        .dropna(subset=["data_semana", "casos_confirmados"])
+        .sort_values("data_semana")
+        .drop_duplicates(subset=["data_semana"], keep="last")
+        .reset_index(drop=True)
+    )
 
 
 @st.cache_data(ttl=300)
@@ -105,8 +113,19 @@ def carregar_predicoes():
         errors="coerce"
     )
 
-    return dados.dropna(
-        subset=["data_predicao", "casos_previstos"]
+    return (
+        dados
+        .dropna(
+            subset=["data_predicao", "casos_previstos"]
+        )
+        .sort_values(
+            ["data_predicao", "created_at", "id"]
+        )
+        .drop_duplicates(
+            subset=["data_predicao"],
+            keep="last"
+        )
+        .reset_index(drop=True)
     )
 
 
@@ -121,7 +140,10 @@ def classificar_tendencia(previsao, ultimo_real):
     if ultimo_real == 0:
         return "indeterminada"
 
-    variacao = ((previsao - ultimo_real) / ultimo_real) * 100
+    variacao = (
+        (previsao - ultimo_real)
+        / ultimo_real
+    ) * 100
 
     if variacao <= -10:
         return "queda"
@@ -129,6 +151,29 @@ def classificar_tendencia(previsao, ultimo_real):
         return "aumento"
 
     return "estabilidade"
+
+
+def calcular_metricas(dados_comparacao):
+    if dados_comparacao.empty:
+        return None
+
+    y_real = dados_comparacao["casos_confirmados"].astype(float)
+    y_prev = dados_comparacao["casos_previstos"].astype(float)
+
+    mae = np.mean(np.abs(y_real - y_prev))
+    rmse = np.sqrt(np.mean((y_real - y_prev) ** 2))
+
+    ss_res = np.sum((y_real - y_prev) ** 2)
+    ss_tot = np.sum((y_real - np.mean(y_real)) ** 2)
+
+    r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else np.nan
+
+    return {
+        "r2": r2,
+        "mae": mae,
+        "rmse": rmse,
+        "amostras": len(dados_comparacao)
+    }
 
 
 st.title("Motor de Inferência Preditiva para Casos de Dengue")
@@ -160,72 +205,136 @@ if predicoes.empty:
     st.stop()
 
 ultima_semana = casos.iloc[-1]
-ultima_previsao = predicoes.sort_values(
-    ["data_predicao", "created_at", "id"]
-).iloc[-1]
-
-data_ultima_semana = ultima_semana["data_semana"]
-data_previsao = ultima_previsao["data_predicao"]
-
+data_ultima_real = ultima_semana["data_semana"]
 casos_ultima_semana = float(ultima_semana["casos_confirmados"])
-casos_previstos = float(ultima_previsao["casos_previstos"])
 
-variacao = 0.0
+predicoes_historicas = predicoes[
+    predicoes["data_predicao"] <= data_ultima_real
+].copy()
 
-if casos_ultima_semana != 0:
-    variacao = (
-        (casos_previstos - casos_ultima_semana)
-        / casos_ultima_semana
-    ) * 100
+predicoes_futuras = predicoes[
+    predicoes["data_predicao"] > data_ultima_real
+].copy()
 
-tendencia = classificar_tendencia(
-    casos_previstos,
-    casos_ultima_semana
+if predicoes_futuras.empty:
+    previsao_operacional = None
+else:
+    previsao_operacional = (
+        predicoes_futuras
+        .sort_values("data_predicao")
+        .iloc[0]
+    )
+
+comparacao = pd.merge(
+    casos[
+        ["data_semana", "casos_confirmados"]
+    ],
+    predicoes_historicas[
+        [
+            "data_predicao",
+            "casos_previstos",
+            "modelo_usado",
+            "created_at"
+        ]
+    ],
+    how="inner",
+    left_on="data_semana",
+    right_on="data_predicao"
 )
+
+if not comparacao.empty:
+    comparacao["erro_absoluto"] = np.abs(
+        comparacao["casos_confirmados"]
+        - comparacao["casos_previstos"]
+    )
+
+metricas_historicas = calcular_metricas(comparacao)
 
 st.markdown("---")
 
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    st.metric(
-        "Próxima semana",
-        formatar_data(data_previsao)
+if previsao_operacional is not None:
+    data_previsao = previsao_operacional["data_predicao"]
+    casos_previstos = float(
+        previsao_operacional["casos_previstos"]
     )
 
-with col2:
-    st.metric(
-        "Casos previstos",
-        f"{casos_previstos:.0f}"
+    variacao = (
+        (
+            casos_previstos
+            - casos_ultima_semana
+        )
+        / casos_ultima_semana
+    ) * 100 if casos_ultima_semana != 0 else 0.0
+
+    tendencia = classificar_tendencia(
+        casos_previstos,
+        casos_ultima_semana
     )
 
-with col3:
-    st.metric(
-        "Última semana observada",
-        f"{casos_ultima_semana:.0f}"
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric(
+            "Próxima semana",
+            formatar_data(data_previsao)
+        )
+
+    with col2:
+        st.metric(
+            "Casos previstos",
+            f"{casos_previstos:.0f}"
+        )
+
+    with col3:
+        st.metric(
+            "Última semana observada",
+            f"{casos_ultima_semana:.0f}"
+        )
+
+    with col4:
+        st.metric(
+            "Variação estimada",
+            f"{variacao:+.1f}%"
+        )
+
+    st.info(
+        f"Tendência estimada: **{tendencia}**. "
+        f"Última semana observada: {formatar_data(data_ultima_real)}."
     )
 
-with col4:
-    st.metric(
-        "Variação estimada",
-        f"{variacao:+.1f}%"
+else:
+    st.warning(
+        "Não há previsão futura registrada. "
+        "Execute o workflow de inferência para gerar a previsão "
+        "da próxima semana."
     )
 
-st.info(
-    f"Tendência estimada pelo modelo: **{tendencia}**. "
-    f"A última semana disponível foi {formatar_data(data_ultima_semana)}."
-)
+st.markdown("## Casos reais e previsões históricas")
 
-st.markdown("## Histórico recente")
+maximo_semanas = min(104, len(casos))
+valor_padrao = min(52, maximo_semanas)
 
 quantidade_semanas = st.slider(
-    "Semanas exibidas",
+    "Período exibido no gráfico",
     min_value=12,
-    max_value=min(52, len(casos)),
-    value=min(26, len(casos))
+    max_value=maximo_semanas,
+    value=valor_padrao,
+    step=1
 )
 
-casos_grafico = casos.tail(quantidade_semanas).copy()
+data_inicio_grafico = (
+    casos
+    .tail(quantidade_semanas)["data_semana"]
+    .min()
+)
+
+casos_grafico = casos[
+    casos["data_semana"] >= data_inicio_grafico
+].copy()
+
+predicoes_historicas_grafico = predicoes_historicas[
+    predicoes_historicas["data_predicao"] >= data_inicio_grafico
+].copy()
 
 fig = go.Figure()
 
@@ -235,24 +344,18 @@ fig.add_trace(
         y=casos_grafico["casos_confirmados"],
         mode="lines+markers",
         name="Casos reais",
-        line=dict(color="#222222", width=3),
-        marker=dict(size=7)
+        line=dict(color="#1f1f1f", width=3),
+        marker=dict(size=6)
     )
 )
 
-predicoes_grafico = predicoes[
-    predicoes["data_predicao"].isin(
-        casos_grafico["data_semana"]
-    )
-].copy()
-
-if not predicoes_grafico.empty:
+if not predicoes_historicas_grafico.empty:
     fig.add_trace(
         go.Scatter(
-            x=predicoes_grafico["data_predicao"],
-            y=predicoes_grafico["casos_previstos"],
+            x=predicoes_historicas_grafico["data_predicao"],
+            y=predicoes_historicas_grafico["casos_previstos"],
             mode="lines+markers",
-            name="Previsões registradas",
+            name="Previsões históricas",
             line=dict(
                 color="#d62728",
                 width=2,
@@ -262,90 +365,130 @@ if not predicoes_grafico.empty:
         )
     )
 
-fig.add_trace(
-    go.Scatter(
-        x=[data_previsao],
-        y=[casos_previstos],
-        mode="markers",
-        name="Próxima previsão",
-        marker=dict(
-            color="#1f77b4",
-            size=14,
-            symbol="diamond"
+if previsao_operacional is not None:
+    fig.add_trace(
+        go.Scatter(
+            x=[previsao_operacional["data_predicao"]],
+            y=[previsao_operacional["casos_previstos"]],
+            mode="markers",
+            name="Próxima previsão",
+            marker=dict(
+                color="#1f77b4",
+                size=15,
+                symbol="diamond"
+            )
         )
     )
-)
 
 fig.update_layout(
-    height=500,
+    height=520,
     hovermode="x unified",
     xaxis_title="Semana epidemiológica",
     yaxis_title="Quantidade de casos",
-    legend_title="Série",
+    legend_title="Séries",
     margin=dict(l=20, r=20, t=30, b=20)
 )
 
-st.plotly_chart(fig, use_container_width=True)
-
-st.markdown("## Previsões registradas")
-
-tabela_predicoes = predicoes.sort_values(
-    "data_predicao",
-    ascending=False
-).copy()
-
-tabela_predicoes["data_predicao"] = (
-    tabela_predicoes["data_predicao"]
-    .dt.strftime("%d/%m/%Y")
+st.plotly_chart(
+    fig,
+    use_container_width=True
 )
 
-tabela_predicoes["casos_previstos"] = (
-    tabela_predicoes["casos_previstos"]
-    .round(0)
-    .astype("Int64")
-)
+st.markdown("## Avaliação das previsões históricas")
 
-st.dataframe(
-    tabela_predicoes[
+if metricas_historicas is None:
+    st.warning(
+        "Ainda não há semanas com previsão e caso real correspondentes."
+    )
+else:
+    metrica1, metrica2, metrica3, metrica4 = st.columns(4)
+
+    with metrica1:
+        st.metric("R² histórico", f"{metricas_historicas['r2']:.4f}")
+
+    with metrica2:
+        st.metric(
+            "MAE histórico",
+            f"{metricas_historicas['mae']:.2f} casos"
+        )
+
+    with metrica3:
+        st.metric(
+            "RMSE histórico",
+            f"{metricas_historicas['rmse']:.2f} casos"
+        )
+
+    with metrica4:
+        st.metric(
+            "Semanas comparadas",
+            metricas_historicas["amostras"]
+        )
+
+    st.caption(
+        "Métricas calculadas a partir das previsões históricas "
+        "simuladas e dos respectivos casos posteriormente observados."
+    )
+
+st.markdown("## Tabela de acompanhamento")
+
+if comparacao.empty:
+    st.info(
+        "Não há previsões históricas para comparar com os casos reais."
+    )
+else:
+    tabela = comparacao[
         [
-            "data_predicao",
+            "data_semana",
+            "casos_confirmados",
             "casos_previstos",
-            "modelo_usado",
-            "created_at"
+            "erro_absoluto",
+            "modelo_usado"
         ]
-    ],
-    use_container_width=True,
-    hide_index=True
-)
+    ].copy()
 
-st.markdown("## Desempenho do modelo")
+    tabela = tabela.rename(
+        columns={
+            "data_semana": "Data da semana",
+            "casos_confirmados": "Casos reais",
+            "casos_previstos": "Casos previstos",
+            "erro_absoluto": "Erro absoluto",
+            "modelo_usado": "Modelo"
+        }
+    )
 
-metrica1, metrica2, metrica3, metrica4 = st.columns(4)
+    tabela["Data da semana"] = (
+        tabela["Data da semana"]
+        .dt.strftime("%d/%m/%Y")
+    )
 
-with metrica1:
-    st.metric("R²", "0,6947")
+    for coluna in [
+        "Casos reais",
+        "Casos previstos",
+        "Erro absoluto"
+    ]:
+        tabela[coluna] = tabela[coluna].round(0).astype("Int64")
 
-with metrica2:
-    st.metric("MAE", "64,80 casos")
+    tabela = tabela.sort_values(
+        "Data da semana",
+        ascending=False
+    )
 
-with metrica3:
-    st.metric("RMSE", "82,01 casos")
+    st.dataframe(
+        tabela,
+        use_container_width=True,
+        hide_index=True
+    )
 
-with metrica4:
-    st.metric("Features", "17")
-
-st.caption(
-    "Métricas obtidas no backtesting walk-forward das últimas "
-    "52 semanas, com retreinamento semanal."
-)
-
-with st.expander("Variáveis utilizadas pelo modelo"):
+with st.expander("Metodologia e variáveis do modelo"):
     st.write(
         """
-        O modelo utiliza lags de temperatura mínima, umidade máxima
-        e casos confirmados, além de densidade populacional, taxa de
-        coleta de resíduos, índice de Breteau, médias móveis de casos,
-        variação semanal e codificação sazonal.
+        As previsões históricas foram produzidas por simulação
+        walk-forward. Para cada semana prevista, o modelo XGBoost
+        foi retreinado utilizando somente os registros anteriores
+        à semana-alvo. Foram utilizadas 17 variáveis: lags de casos,
+        temperatura mínima e umidade máxima; densidade populacional;
+        taxa de coleta de resíduos; índice de Breteau; médias móveis;
+        variação semanal de casos; e componentes de sazonalidade.
         """
     )
 
@@ -357,6 +500,6 @@ st.caption(
 )
 
 st.caption(
-    f"Atualização da página: "
+    f"Página consultada em: "
     f"{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
 )
