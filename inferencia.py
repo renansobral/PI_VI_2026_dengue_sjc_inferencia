@@ -202,11 +202,13 @@ for i in range(len(df_backtest)):
 
     # Tendência
     casos_com_shift = historico["casos_confirmados"].shift(1)
-    casos_media_2s = float(casos_com_shift.iloc[-2:].mean())
-    casos_media_4s = float(casos_com_shift.iloc[-4:].mean())
-    variacao_casos_1s = float(
-        historico["casos_confirmados"].iloc[-2] - historico["casos_confirmados"].iloc[-3]
-    )
+    casos_media_2s = historico["casos_confirmados"].iloc[-2:].mean()
+    casos_media_4s = historico["casos_confirmados"].iloc[-4:].mean()
+
+variacao_casos_1s = (
+    historico["casos_confirmados"].iloc[-1]
+    - historico["casos_confirmados"].iloc[-2]
+)
 
     # Sazonalidade
     semana_ano_alvo = int(linha_alvo["data_semana"].isocalendar().week)
@@ -342,15 +344,16 @@ X_futuro = pd.DataFrame({
     "casos_lag_2": [df["casos_confirmados"].iloc[-2]],
     "casos_lag_3": [df["casos_confirmados"].iloc[-3]],
     # Tendência recente
-    "casos_media_2s": [
-        df["casos_confirmados"].shift(1).iloc[-2:].mean()
-    ],
-    "casos_media_4s": [
-        df["casos_confirmados"].shift(1).iloc[-4:].mean()
-    ],
-    "variacao_casos_1s": [
-        df["casos_confirmados"].iloc[-2] - df["casos_confirmados"].iloc[-3]
-    ],
+   "casos_media_2s": [
+    df["casos_confirmados"].iloc[-2:].mean()
+],
+"casos_media_4s": [
+    df["casos_confirmados"].iloc[-4:].mean()
+],
+"variacao_casos_1s": [
+    df["casos_confirmados"].iloc[-1]
+    - df["casos_confirmados"].iloc[-2]
+],
     # Sazonalidade anual
     "semana_sin": [np.sin(2 * np.pi * semana_ano_proxima / 52)],
     "semana_cos": [np.cos(2 * np.pi * semana_ano_proxima / 52)]
