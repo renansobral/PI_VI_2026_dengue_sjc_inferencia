@@ -24,7 +24,7 @@ ANO_SIMULACAO = 2025
 # Teste inicial seguro:
 # - 4 = processa apenas as quatro primeiras semanas de 2025.
 # - None = processa todas as semanas de 2025.
-LIMITE_SEMANAS = 4
+LIMITE_SEMANAS = none
 
 MODELO_USADO = "XGBoost_v2_17features_simulacao_2025"
 
