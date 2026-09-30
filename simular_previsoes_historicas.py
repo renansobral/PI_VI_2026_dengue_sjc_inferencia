@@ -19,7 +19,7 @@ warnings.filterwarnings("ignore")
 # ==============================================================================
 # 1. PARÂMETROS DA SIMULAÇÃO
 # ==============================================================================
-ANO_SIMULACAO = 2025
+ANO_SIMULACAO = 2026
 
 # Teste inicial seguro:
 # - 4 = processa apenas as quatro primeiras semanas de 2025.
