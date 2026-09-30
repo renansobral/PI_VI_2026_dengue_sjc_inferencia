@@ -315,15 +315,22 @@ else:
 
 st.markdown("## Casos reais e previsões históricas")
 
-maximo_semanas = min(104, len(casos))
-valor_padrao = min(52, maximo_semanas)
+opcoes_periodo = {
+    "Últimas 26 semanas": 26,
+    "Últimas 52 semanas": 52,
+    "Últimas 104 semanas": 104,
+    "Histórico completo": len(casos)
+}
 
-quantidade_semanas = st.slider(
+periodo_escolhido = st.selectbox(
     "Período exibido no gráfico",
-    min_value=12,
-    max_value=maximo_semanas,
-    value=valor_padrao,
-    step=1
+    options=list(opcoes_periodo.keys()),
+    index=1
+)
+
+quantidade_semanas = min(
+    opcoes_periodo[periodo_escolhido],
+    len(casos)
 )
 
 data_inicio_grafico = (
@@ -339,64 +346,6 @@ casos_grafico = casos[
 predicoes_historicas_grafico = predicoes_historicas[
     predicoes_historicas["data_predicao"] >= data_inicio_grafico
 ].copy()
-
-fig = go.Figure()
-
-fig.add_trace(
-    go.Scatter(
-        x=casos_grafico["data_semana"],
-        y=casos_grafico["casos_confirmados"],
-        mode="lines+markers",
-        name="Casos reais",
-        line=dict(color="#1f1f1f", width=3),
-        marker=dict(size=6)
-    )
-)
-
-if not predicoes_historicas_grafico.empty:
-    fig.add_trace(
-        go.Scatter(
-            x=predicoes_historicas_grafico["data_predicao"],
-            y=predicoes_historicas_grafico["casos_previstos"],
-            mode="lines+markers",
-            name="Previsões históricas",
-            line=dict(
-                color="#d62728",
-                width=2,
-                dash="dash"
-            ),
-            marker=dict(size=6)
-        )
-    )
-
-if previsao_operacional is not None:
-    fig.add_trace(
-        go.Scatter(
-            x=[previsao_operacional["data_predicao"]],
-            y=[previsao_operacional["casos_previstos"]],
-            mode="markers",
-            name="Próxima previsão",
-            marker=dict(
-                color="#1f77b4",
-                size=15,
-                symbol="diamond"
-            )
-        )
-    )
-
-fig.update_layout(
-    height=520,
-    hovermode="x unified",
-    xaxis_title="Semana epidemiológica",
-    yaxis_title="Quantidade de casos",
-    legend_title="Séries",
-    margin=dict(l=20, r=20, t=30, b=20)
-)
-
-st.plotly_chart(
-    fig,
-    use_container_width=True
-)
 
 st.markdown("## Avaliação das previsões históricas")
 
@@ -470,7 +419,11 @@ else:
         "Casos previstos",
         "Erro absoluto"
     ]:
-        tabela[coluna] = tabela[coluna].round(0).astype("Int64")
+        tabela[coluna] = (
+            tabela[coluna]
+            .round(0)
+            .astype("Int64")
+        )
 
     tabela = tabela.sort_values(
         "Data da semana",
@@ -482,7 +435,6 @@ else:
         use_container_width=True,
         hide_index=True
     )
-
 with st.expander("Metodologia e variáveis do modelo"):
     st.write(
         """
