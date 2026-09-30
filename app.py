@@ -216,6 +216,10 @@ predicoes_futuras = predicoes[
     predicoes["data_predicao"] > data_ultima_real
 ].copy()
 
+st.write("Diagnóstico — última data real:", data_ultima_real)
+st.write("Diagnóstico — última previsão:", predicoes["data_predicao"].max())
+st.write("Diagnóstico — previsões futuras:", len(predicoes_futuras))
+
 if predicoes_futuras.empty:
     previsao_operacional = None
 else:
