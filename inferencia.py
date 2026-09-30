@@ -374,7 +374,7 @@ print("Salvando predição no Supabase...")
 supabase.table("predicoes_dengue").insert({
     "semana_predita": int(proxima_semana.strftime('%Y%m')),
     "data_predicao": proxima_semana.strftime('%Y-%m-%d'),
-    "casos_previstos": int(predicao_proxima_semana),
+    "casos_previstos": int(round(predicao_proxima_semana)),
     "modelo_usado": "XGBoost_v2_17features_walkforward_52s"
 }).execute()
 
