@@ -200,15 +200,17 @@ for i in range(len(df_backtest)):
     casos_lag_2 = float(historico["casos_confirmados"].iloc[-2])
     casos_lag_3 = float(historico["casos_confirmados"].iloc[-3])
 
-    # Tendência
-    casos_com_shift = historico["casos_confirmados"].shift(1)
-    casos_media_2s = historico["casos_confirmados"].iloc[-2:].mean()
-    casos_media_4s = historico["casos_confirmados"].iloc[-4:].mean()
-
-variacao_casos_1s = (
-    historico["casos_confirmados"].iloc[-1]
-    - historico["casos_confirmados"].iloc[-2]
-)
+    # Tendência: somente casos conhecidos antes da semana-alvo
+    casos_media_2s = float(
+        historico["casos_confirmados"].iloc[-2:].mean()
+    )
+    casos_media_4s = float(
+        historico["casos_confirmados"].iloc[-4:].mean()
+    )
+    variacao_casos_1s = float(
+        historico["casos_confirmados"].iloc[-1]
+        - historico["casos_confirmados"].iloc[-2]
+    )
 
     # Sazonalidade
     semana_ano_alvo = int(linha_alvo["data_semana"].isocalendar().week)
