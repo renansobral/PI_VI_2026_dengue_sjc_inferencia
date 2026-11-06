@@ -371,12 +371,12 @@ print(f"Predição para {proxima_semana.strftime('%d/%m/%Y')}: {predicao_proxima
 # ==============================================================================
 print("Salvando predição no Supabase...")
 
-supabase.table("predicoes_dengue").insert({
+supabase.table("predicoes_dengue").upsert({
     "semana_predita": int(proxima_semana.strftime('%Y%m')),
     "data_predicao": proxima_semana.strftime('%Y-%m-%d'),
     "casos_previstos": int(round(predicao_proxima_semana)),
     "modelo_usado": "XGBoost_v2_17features_walkforward_52s"
-}).execute()
+}, on_conflict="data_predicao").execute()
 
 print("✅ Predição salva no Supabase!")
 print("🎉 Pipeline finalizado com sucesso!")
