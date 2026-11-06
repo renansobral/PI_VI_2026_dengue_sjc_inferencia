@@ -296,6 +296,44 @@ else:
     print("Nenhuma semana válida para backtest walk-forward.")
 
 # ==============================================================================
+# 6.1 BACKFILL DAS PREVISÕES RETROSPECTIVAS DE OUTUBRO/2026
+# ==============================================================================
+print("Registrando previsões retrospectivas de outubro/2026 no Supabase...")
+
+# Filtra somente as semanas de outubro de 2026 no resultado do backtest
+df_outubro = df_resultados_backtest[
+    (df_resultados_backtest["data_semana"] >= "2026-10-01") &
+    (df_resultados_backtest["data_semana"] <= "2026-10-31")
+].copy()
+
+if not df_outubro.empty:
+    registros_outubro = []
+
+    for _, linha in df_outubro.iterrows():
+        data_predicao = pd.to_datetime(linha["data_semana"])
+
+        # Calcula semana ISO no formato AAAASS (ex.: 202641)
+        ano_iso, semana_iso, _ = data_predicao.isocalendar()
+        semana_predita = int(f"{ano_iso}{semana_iso:02d}")
+
+        registros_outubro.append({
+            "semana_predita": semana_predita,
+            "data_predicao": data_predicao.strftime("%Y-%m-%d"),
+            "casos_previstos": int(round(linha["casos_previstos"])),
+            "modelo_usado": "XGBoost_v2_17features_backtest_2026"
+        })
+
+    supabase.table("predicoes_dengue").upsert(
+        registros_outubro,
+        on_conflict="data_predicao"
+    ).execute()
+
+    print(f"✅ {len(registros_outubro)} previsões retrospectivas de outubro registradas/atualizadas.")
+else:
+    print("Nenhuma semana de outubro/2026 encontrada no backtest para registrar.")
+
+
+# ==============================================================================
 # 7. TREINAR MODELO FINAL COM TODOS OS DADOS
 # ==============================================================================
 print("Treinando modelo final com todos os dados disponíveis...")
@@ -372,7 +410,7 @@ print(f"Predição para {proxima_semana.strftime('%d/%m/%Y')}: {predicao_proxima
 print("Salvando predição no Supabase...")
 
 supabase.table("predicoes_dengue").upsert({
-    "semana_predita": int(proxima_semana.strftime('%Y%m')),
+    "semana_predita": int(f"{proxima_semana.isocalendar()[0]}{proxima_semana.isocalendar()[1]:02d}"),
     "data_predicao": proxima_semana.strftime('%Y-%m-%d'),
     "casos_previstos": int(round(predicao_proxima_semana)),
     "modelo_usado": "XGBoost_v2_17features_walkforward_52s"
