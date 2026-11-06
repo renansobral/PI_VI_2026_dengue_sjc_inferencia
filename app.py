@@ -184,6 +184,10 @@ st.caption(
     "As estimativas não substituem os boletins oficiais."
 )
 
+if st.button("Atualizar dados do Supabase"):
+    carregar_casos.clear()
+    carregar_predicoes.clear()
+
 try:
     with st.spinner("Consultando dados epidemiológicos no Supabase..."):
         casos = carregar_casos()
@@ -249,6 +253,82 @@ if not comparacao.empty:
     )
 
 metricas_historicas = calcular_metricas(comparacao)
+
+with st.expander("Diagnóstico dos dados carregados"):
+    st.write({
+        "Quantidade de semanas observadas": len(casos),
+        "Última semana observada": formatar_data(
+            casos["data_semana"].max()
+        ),
+        "Quantidade de previsões carregadas": len(predicoes),
+        "Última data prevista": formatar_data(
+            predicoes["data_predicao"].max()
+        ),
+        "Semanas com previsão e observação": len(comparacao)
+    })
+
+    datas_outubro = pd.to_datetime([
+        "2026-10-04",
+        "2026-10-11",
+        "2026-10-18",
+        "2026-10-25"
+    ])
+
+    diagnostico = pd.DataFrame({
+        "data_semana": datas_outubro
+    })
+
+    diagnostico = diagnostico.merge(
+        casos[["data_semana", "casos_confirmados"]],
+        on="data_semana",
+        how="left",
+        validate="one_to_one"
+    )
+
+    diagnostico = diagnostico.merge(
+        predicoes[
+            [
+                "data_predicao",
+                "casos_previstos",
+                "modelo_usado"
+            ]
+        ],
+        left_on="data_semana",
+        right_on="data_predicao",
+        how="left",
+        validate="one_to_one"
+    )
+
+    diagnostico["Observação carregada"] = (
+        diagnostico["casos_confirmados"].notna()
+    )
+
+    diagnostico["Previsão carregada"] = (
+        diagnostico["casos_previstos"].notna()
+    )
+
+    st.write("Conferência das quatro semanas de outubro de 2026:")
+
+    st.dataframe(
+        diagnostico[
+            [
+                "data_semana",
+                "casos_confirmados",
+                "casos_previstos",
+                "modelo_usado",
+                "Observação carregada",
+                "Previsão carregada"
+            ]
+        ],
+        column_config={
+            "data_semana": st.column_config.DatetimeColumn(
+                "Data da semana",
+                format="DD/MM/YYYY"
+            )
+        },
+        use_container_width=True,
+        hide_index=True
+    )
 
 st.markdown("---")
 
@@ -436,15 +516,20 @@ if comparacao.empty:
         "Não há previsões históricas para comparar com os casos reais."
     )
 else:
-    tabela = comparacao[
-        [
-            "data_semana",
-            "casos_confirmados",
-            "casos_previstos",
-            "erro_absoluto",
-            "modelo_usado"
+    tabela = (
+        comparacao[
+            [
+                "data_semana",
+                "casos_confirmados",
+                "casos_previstos",
+                "erro_absoluto",
+                "modelo_usado"
+            ]
         ]
-    ].copy()
+        .copy()
+        .sort_values("data_semana", ascending=False)
+        .reset_index(drop=True)
+    )
 
     tabela = tabela.rename(
         columns={
@@ -456,10 +541,8 @@ else:
         }
     )
 
-    tabela["Data da semana"] = (
-        tabela["Data da semana"]
-        .dt.strftime("%d/%m/%Y")
-    )
+    # Preserva o tipo de data para ordenar corretamente na interface.
+    tabela["Data da semana"] = tabela["Data da semana"].dt.date
 
     for coluna in [
         "Casos reais",
@@ -468,13 +551,14 @@ else:
     ]:
         tabela[coluna] = tabela[coluna].round(0).astype("Int64")
 
-    tabela = tabela.sort_values(
-        "Data da semana",
-        ascending=False
-    )
-
     st.dataframe(
         tabela,
+        column_config={
+            "Data da semana": st.column_config.DateColumn(
+                "Data da semana",
+                format="DD/MM/YYYY"
+            )
+        },
         use_container_width=True,
         hide_index=True
     )
